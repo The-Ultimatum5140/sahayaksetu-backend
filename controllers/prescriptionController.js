@@ -4,15 +4,8 @@ import Queue from "../models/QueueModel.js";
 
 export const addPrescription = async (req, res) => {
   try {
-    const {
-      appointmentId,
-      diagnosis,
-      medicines,
-      notes,
-      tests,
-      followUpDate,
-    } = req.body;
-
+    const { appointmentId, diagnosis, medicines, notes, tests, followUpDate } =
+      req.body;
     const doctorId = req.docId;
 
     // validation
@@ -65,6 +58,7 @@ export const addPrescription = async (req, res) => {
       diagnosis,
       medicines,
       notes,
+      signature:req.body.signature || "",
       tests,
       followUpDate,
     });
@@ -76,7 +70,7 @@ export const addPrescription = async (req, res) => {
     // update queue safely
     const queue = await Queue.findOneAndUpdate(
       { appointmentId },
-      { status: "completed" }
+      { status: "completed" },
     );
 
     res.status(201).json({
@@ -84,7 +78,6 @@ export const addPrescription = async (req, res) => {
       message: "Prescription added",
       prescription: newPrescription,
     });
-
   } catch (error) {
     console.log(error);
     res.status(500).json({
@@ -118,7 +111,6 @@ export const getPatientPrescriptions = async (req, res) => {
       success: true,
       prescriptions,
     });
-
   } catch (error) {
     console.log(error);
     res.status(500).json({
@@ -127,7 +119,6 @@ export const getPatientPrescriptions = async (req, res) => {
     });
   }
 };
-
 
 // ================= GET DOCTOR PRESCRIPTIONS =================
 export const getDoctorPrescriptions = async (req, res) => {
@@ -153,7 +144,6 @@ export const getDoctorPrescriptions = async (req, res) => {
       success: true,
       prescriptions,
     });
-
   } catch (error) {
     console.log(error);
     res.status(500).json({
@@ -162,7 +152,6 @@ export const getDoctorPrescriptions = async (req, res) => {
     });
   }
 };
-
 
 // ================= GET SINGLE PRESCRIPTION =================
 export const getPrescriptionById = async (req, res) => {
@@ -194,7 +183,6 @@ export const getPrescriptionById = async (req, res) => {
       success: true,
       prescription,
     });
-
   } catch (error) {
     console.log(error);
     res.status(500).json({
@@ -203,7 +191,6 @@ export const getPrescriptionById = async (req, res) => {
     });
   }
 };
-
 
 // ================= UPDATE PRESCRIPTION STATUS =================
 export const updatePrescriptionStatus = async (req, res) => {
@@ -242,12 +229,116 @@ export const updatePrescriptionStatus = async (req, res) => {
       success: true,
       message: "Prescription status updated",
     });
-
   } catch (error) {
     console.log(error);
     res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+// ================= GET PRESCRIPTION BY APPOINTMENT =================
+export const getPrescriptionByAppointment = async (req, res) => {
+  try {
+    const { appointmentId } = req.params;
+
+    const pres = await Prescription.findOne({ appointmentId });
+
+    if (!pres) {
+      return res.json({ success: false, message: "Not found" });
+    }
+
+    res.json({ success: true, prescription: pres });
+  } catch (err) {
+    res.json({ success: false, message: err.message });
+  }
+};
+// ================= UPDATE PRESCRIPTION =================
+export const updatePrescription = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // fetch first
+    const existingPrescription = await Prescription.findById(id);
+
+    if (!existingPrescription) {
+      return res.json({
+        success: false,
+        message: "Prescription not found",
+      });
+    }
+
+    // 🔒 lock check
+    if (existingPrescription.isLocked) {
+      return res.json({
+        success: false,
+        message: "Prescription is locked",
+      });
+    }
+
+    //now update
+    const updated = await Prescription.findByIdAndUpdate(
+      id,
+      req.body,
+      { new: true }
+    );
+
+    res.json({
+      success: true,
+      prescription: updated,
+    });
+
+  } catch (err) {
+    res.json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+// ================= LOCK PRESCRIPTION =================
+export const lockPrescription = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 🔍 find prescription
+    const prescription = await Prescription.findById(id);
+
+    if (!prescription) {
+      return res.json({
+        success: false,
+        message: "Prescription not found",
+      });
+    }
+
+    // 🔒 already locked check
+    if (prescription.isLocked) {
+      return res.json({
+        success: false,
+        message: "Already locked",
+      });
+    }
+
+    // 🔐 optional: doctor ownership check
+    if (prescription.doctorId.toString() !== req.doctorId) {
+      return res.json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // 🔥 lock it
+    prescription.isLocked = true;
+    await prescription.save();
+
+    res.json({
+      success: true,
+      message: "Prescription locked successfully",
+      prescription,
+    });
+  } catch (err) {
+    res.json({
+      success: false,
+      message: err.message,
     });
   }
 };

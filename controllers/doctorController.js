@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import appointmentModel from "../models/AppointmentModel.js";
 import Queue from "../models/QueueModel.js";
+import mongoose from "mongoose";
 /* 
    CHANGE DOCTOR AVAILABILITY
 */
@@ -155,7 +156,7 @@ const appointmentsDoctor = async (req, res) => {
     const docId = req.docId;
 
     const appointments = await appointmentModel
-      .find({ docId, cancelled: false, isCompleted: false })
+      .find({ docId})
       .populate("userId", "name email phone")
       .sort({ createdAt: -1 });
 

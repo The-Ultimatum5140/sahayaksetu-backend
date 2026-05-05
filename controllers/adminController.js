@@ -297,29 +297,13 @@ const appointmentCancel = async (req, res) => {
     const appointment = await appointmentModel.findById(appointmentId);
 
     if (!appointment) {
-      return res.json({
-        success: false,
-        message: "Appointment not found",
-      });
+      return res.json({ success: false, message: "Appointment not found" });
     }
 
-    // authorization
-    if (appointment.userId.toString() !== req.userId.toString()) {
-      return res.json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    // already cancelled
     if (appointment.cancelled) {
-      return res.json({
-        success: false,
-        message: "Already cancelled",
-      });
+      return res.json({ success: false, message: "Already cancelled" });
     }
 
-    // prevent cancel after completion
     if (appointment.isCompleted) {
       return res.json({
         success: false,
@@ -327,22 +311,20 @@ const appointmentCancel = async (req, res) => {
       });
     }
 
-    // mark cancelled
+    // REMOVE WRONG AUTH CHECK
+
     appointment.cancelled = true;
     await appointment.save();
 
-    // remove slot safely
     await doctorModel.updateOne(
       { _id: appointment.docId },
       {
         $pull: {
-          [`slots_booked.${appointment.slotDate}`]:
-            appointment.slotTime.toUpperCase(),
+          [`slots_booked.${appointment.slotDate}`]: appointment.slotTime,
         },
       },
     );
 
-    // update queue
     await Queue.findOneAndUpdate({ appointmentId }, { status: "cancelled" });
 
     res.json({

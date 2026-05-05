@@ -13,15 +13,25 @@ const prescriptionSchema = new mongoose.Schema(
       ref: "user",
       required: true,
     },
-
+    isLocked: {
+      type: Boolean,
+      default: false,
+    },
+    signature: {
+      type: String,
+      default: "",
+    },
     appointmentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "appointment",
       required: true,
-      unique: true, // one prescription per appointment
+      unique: true,
     },
 
-    diagnosis: String,
+    diagnosis: {
+      type: String,
+      required: true,
+    },
 
     medicines: {
       type: [
@@ -37,7 +47,14 @@ const prescriptionSchema = new mongoose.Schema(
           duration: { type: Number, required: true },
         },
       ],
-      validate: [(arr) => arr.length > 0, "At least one medicine required"],
+      validate: [
+        {
+          validator: function (arr) {
+            return Array.isArray(arr) && arr.length > 0;
+          },
+          message: "At least one medicine required",
+        },
+      ],
     },
 
     tests: [
@@ -52,21 +69,15 @@ const prescriptionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["active", "completed", "archived"],
+      enum: ["active", "completed"],
       default: "active",
-    },
-
-    version: {
-      type: Number,
-      default: 1,
     },
   },
   { timestamps: true },
 );
 
-// indexes
+// indexes (keep only useful ones)
 prescriptionSchema.index({ doctorId: 1 });
 prescriptionSchema.index({ patientId: 1 });
-prescriptionSchema.index({ appointmentId: 1 });
 
 export default mongoose.model("Prescription", prescriptionSchema);
