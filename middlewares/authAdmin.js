@@ -1,30 +1,33 @@
 import jwt from "jsonwebtoken";
 
-const authAdmin = async (req, res, next) => {
+const authAdmin = (req, res, next) => {
   try {
-    const atoken = req.headers.atoken;
-    console.log("HEADERS RECEIVED:", req.headers);
+    const token = req.headers.token;
 
-    if (!atoken) {
+    if (!token) {
       return res.json({
         success: false,
         message: "Not authorized, login again",
       });
     }
 
-    const decoded = jwt.verify(atoken, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.email !== process.env.ADMIN_EMAIL) {
+    // role check
+    if (decoded.role !== "admin") {
       return res.json({
         success: false,
-        message: "Unauthorized access",
+        message: "Admin access required",
       });
     }
 
     next();
   } catch (err) {
     console.log(err);
-    res.json({ success: false, message: "Invalid token" });
+    res.json({
+      success: false,
+      message: "Invalid token",
+    });
   }
 };
 

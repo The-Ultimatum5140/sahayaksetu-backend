@@ -2,15 +2,14 @@ import doctorModel from "../models/doctorModel.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import appointmentModel from "../models/AppointmentModel.js";
+import Queue from "../models/QueueModel.js";
 /* 
    CHANGE DOCTOR AVAILABILITY
 */
-
 const changeAvailability = async (req, res) => {
   try {
     const { docId } = req.body;
 
-    // check id exists
     if (!docId) {
       return res.json({
         success: false,
@@ -18,7 +17,6 @@ const changeAvailability = async (req, res) => {
       });
     }
 
-    // find doctor
     const doctor = await doctorModel.findById(docId);
 
     if (!doctor) {
@@ -28,13 +26,13 @@ const changeAvailability = async (req, res) => {
       });
     }
 
-    // toggle availability
     doctor.available = !doctor.available;
     await doctor.save();
 
     res.json({
       success: true,
       message: "Availability updated successfully",
+      available: doctor.available,
     });
   } catch (err) {
     console.log("Availability error:", err);
@@ -51,51 +49,102 @@ const changeAvailability = async (req, res) => {
 
 const getAllDoctors = async (req, res) => {
   try {
-    const doctors = await doctorModel.find({});
-    res.json({ success: true, doctors });
+    const doctors = await doctorModel
+      .find({})
+      .select("-password -email")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({
+      success: true,
+      doctors,
+    });
   } catch (err) {
     console.log(err);
-    res.json({ success: false, message: "Error fetching doctors" });
+    res.json({
+      success: false,
+      message: "Error fetching doctors",
+    });
   }
 };
 
 // doctorlist api
 const doctorList = async (req, res) => {
   try {
-    const doctors = await doctorModel.find({}).select(["-password", "-email"]);
+    const doctors = await doctorModel
+      .find({})
+      .select("-password -email")
+      .sort({ createdAt: -1 })
+      .lean();
 
-    //  creating response
-    res.json({ success: true, doctors });
+    res.json({
+      success: true,
+      doctors,
+    });
   } catch (error) {
     console.log(error);
-    res.json({ success: false, message: error.message });
+    res.json({
+      success: false,
+      message: error.message,
+    });
   }
 };
-
 // api for doctor login
 const loginDoctor = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    //  find doctor using email id
-    const doctor = await doctorModel.findOne({ email });
-    // check if doctor is available with this email
-    if (!doctor) {
-      return res.json({ success: false, message: "Invalid credentials!" });
+    let { email, password } = req.body;
+
+    // validation
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password required",
+      });
     }
 
-    // if found check the password
+    // normalize email
+    email = email.toLowerCase().trim();
+
+    //  fetch doctor (explicit password)
+    const doctor = await doctorModel.findOne({ email }).select("+password");
+
+    if (!doctor) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    //  compare password
     const isMatch = await bcrypt.compare(password, doctor.password);
 
-    // if true
-    if (isMatch) {
-      const token = jwt.sign({ id: doctor._id }, process.env.JWT_SECRET);
-      res.json({ success: true, token });
-    } else {
-      res.json({ success: false, message: "Invaid credentials" });
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
     }
+
+    //  token with role
+    const token = jwt.sign(
+      {
+        id: doctor._id,
+        role: "doctor",
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" },
+    );
+
+    res.status(200).json({
+      success: true,
+      token,
+    });
   } catch (err) {
     console.log(err);
-    res.json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Login failed",
+    });
   }
 };
 
@@ -103,9 +152,12 @@ const loginDoctor = async (req, res) => {
 
 const appointmentsDoctor = async (req, res) => {
   try {
-    const docId = req.docId; // from auth middleware
+    const docId = req.docId;
 
-    const appointments = await appointmentModel.find({ docId });
+    const appointments = await appointmentModel
+      .find({ docId, cancelled: false, isCompleted: false })
+      .populate("userId", "name email phone")
+      .sort({ createdAt: -1 });
 
     res.json({ success: true, appointments });
   } catch (err) {
@@ -118,44 +170,127 @@ const appointmentComplete = async (req, res) => {
   try {
     const { appointmentId } = req.body;
 
+    //  validation
+    if (!appointmentId) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment ID required",
+      });
+    }
+
     const appt = await appointmentModel.findById(appointmentId);
 
-    if (!appt)
-      return res.json({ success: false, message: "Appointment not found" });
+    if (!appt) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found",
+      });
+    }
 
-    //  IMPORTANT FIX → loose comparison
-    if (appt.docId != req.docId)
-      return res.json({ success: false, message: "Unauthorized" });
+    // authorization
+    if (appt.docId.toString() !== req.docId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
+    // already completed check
+    if (appt.isCompleted) {
+      return res.status(400).json({
+        success: false,
+        message: "Already completed",
+      });
+    }
+
+    // update appointment
     appt.isCompleted = true;
     await appt.save();
 
-    res.json({ success: true, message: "Appointment completed" });
+    // update queue
+    await Queue.findOneAndUpdate(
+      { appointmentId },
+      { status: "completed" },
+      { new: true },
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Appointment completed",
+    });
   } catch (err) {
-    res.json({ success: false, message: err.message });
+    console.log(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
-
 // CANCEL APPOINTMENT
 const appointmentCancel = async (req, res) => {
   try {
     const { appointmentId } = req.body;
 
+    // validation
+    if (!appointmentId) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment ID required",
+      });
+    }
+
     const appt = await appointmentModel.findById(appointmentId);
 
-    if (!appt)
-      return res.json({ success: false, message: "Appointment not found" });
+    if (!appt) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found",
+      });
+    }
 
-    //  IMPORTANT FIX → loose comparison
-    if (appt.docId != req.docId)
-      return res.json({ success: false, message: "Unauthorized" });
+    //  authorization
+    if (appt.docId.toString() !== req.docId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
+    //  already cancelled
+    if (appt.cancelled) {
+      return res.status(400).json({
+        success: false,
+        message: "Already cancelled",
+      });
+    }
+
+    //  update appointment
     appt.cancelled = true;
     await appt.save();
 
-    res.json({ success: true, message: "Appointment cancelled" });
+    // update queue
+    await Queue.findOneAndUpdate({ appointmentId }, { status: "cancelled" });
+
+    //  free slot once cancelled
+    await doctorModel.updateOne(
+      { _id: appt.docId },
+      {
+        $pull: {
+          [`slots_booked.${appt.slotDate}`]: appt.slotTime,
+        },
+      },
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Appointment cancelled",
+    });
   } catch (err) {
-    res.json({ success: false, message: err.message });
+    console.log(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
@@ -164,28 +299,45 @@ const doctorDashboard = async (req, res) => {
   try {
     const docId = req.docId;
 
-    const appointments = await appointmentModel.find({ docId });
+    // counts
+    const totalAppointments = await appointmentModel.countDocuments({ docId });
 
-    // earnings (paid only)
-    const earnings = appointments.reduce((sum, item) => {
-      if (item.payment) return sum + item.amount;
-      return sum;
-    }, 0);
+    // earnings (only paid)
+    const earningsAgg = await appointmentModel.aggregate([
+      { $match: { docId: new mongoose.Types.ObjectId(docId), payment: true } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+
+    const earnings = earningsAgg[0]?.total || 0;
 
     // unique patients
-    const patients = new Set(appointments.map((item) => item.userId));
+    const uniquePatients = await appointmentModel.distinct("userId", { docId });
+
+    // latest 5 appointments
+    const latestAppointments = await appointmentModel
+      .find({ docId })
+      .populate("userId", "name")
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean();
 
     const dashData = {
       earnings,
-      appointments: appointments.length,
-      patients: patients.size,
-      latestAppointments: [...appointments].reverse().slice(0, 5),
+      appointments: totalAppointments,
+      patients: uniquePatients.length,
+      latestAppointments,
     };
 
-    res.json({ success: true, dashData });
+    res.json({
+      success: true,
+      dashData,
+    });
   } catch (err) {
     console.log(err);
-    res.json({ success: false, message: err.message });
+    res.json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
@@ -194,43 +346,98 @@ const doctorProfile = async (req, res) => {
   try {
     const docId = req.docId;
 
-    const profileData = await doctorModel.findById(docId).select("-password");
+    const profileData = await doctorModel
+      .findById(docId)
+      .select("-password -email")
+      .lean();
 
     if (!profileData) {
-      return res.json({
+      return res.status(404).json({
         success: false,
         message: "Doctor not found",
       });
     }
 
-    res.json({ success: true, profileData });
+    res.status(200).json({
+      success: true,
+      profileData,
+    });
   } catch (err) {
     console.log(err);
-    res.json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
 // UPDATE DOCTOR PROFILE
 const updateDoctorProfile = async (req, res) => {
   try {
-    const docId = req.docId; //  SAFE: from middleware
+    const docId = req.docId;
     const { fees, address, available } = req.body;
 
     const updateData = {};
 
-    if (fees !== undefined) updateData.fees = fees;
-    if (address !== undefined) updateData.address = address;
-    if (available !== undefined) updateData.available = available;
+    //  validation (at least one field)
+    if (
+      fees === undefined &&
+      address === undefined &&
+      available === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "No data provided to update",
+      });
+    }
 
-    await doctorModel.findByIdAndUpdate(docId, updateData);
+    //  fees
+    if (fees !== undefined) {
+      updateData.fees = Number(fees);
+    }
 
-    res.json({
+    //  address (safe parse)
+    if (address !== undefined) {
+      try {
+        updateData.address =
+          typeof address === "string" ? JSON.parse(address) : address;
+      } catch {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid address format",
+        });
+      }
+    }
+
+    //  availability
+    if (available !== undefined) {
+      updateData.available = available;
+    }
+
+    //  update + return new doc
+    const updatedDoctor = await doctorModel
+      .findByIdAndUpdate(docId, updateData, { new: true })
+      .select("-password -email")
+      .lean();
+
+    if (!updatedDoctor) {
+      return res.status(404).json({
+        success: false,
+        message: "Doctor not found",
+      });
+    }
+
+    res.status(200).json({
       success: true,
       message: "Profile Updated",
+      doctor: updatedDoctor,
     });
   } catch (err) {
     console.log(err);
-    res.json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 

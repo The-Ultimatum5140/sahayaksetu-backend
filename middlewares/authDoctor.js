@@ -1,28 +1,33 @@
 import jwt from "jsonwebtoken";
 
-const authDoctor = async (req, res, next) => {
+const authDoctor = (req, res, next) => {
   try {
-    const dToken =
-      req.headers.dtoken ||
+    //  standard header (BEST PRACTICE)
+    const token =
       req.headers.token ||
       req.headers.authorization?.split(" ")[1];
 
-    if (!dToken) {
+    if (!token) {
       return res.status(401).json({
         success: false,
         message: "Not authorized, login again",
       });
     }
 
-    if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET missing");
-    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const decoded = jwt.verify(dToken, process.env.JWT_SECRET);
+    // role check (VERY IMPORTANT)
+    if (decoded.role !== "doctor") {
+      return res.status(403).json({
+        success: false,
+        message: "Doctor access required",
+      });
+    }
 
     req.docId = decoded.id;
 
     next();
+
   } catch (err) {
     console.log("AUTH ERROR:", err.message);
 
