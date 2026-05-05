@@ -1,59 +1,81 @@
 import Queue from "../models/QueueModel.js";
 
 export const chatbotReply = async (req, res) => {
-  try {
-    const { message } = req.body;
+try {
+const { message } = req.body;
 
-    // ✅ safe + clean message
-    const userMessage = message?.toLowerCase().trim() || "";
-    const userId = req.userId;
+// ✅ clean + safe input
+const userMessage = message?.toLowerCase().trim() || "";
+const userId = req.userId;
 
-    let reply = "Sorry, samajh nahi aaya 😅";
+let reply =
+  "Mujhe samajh nahi aaya 😅\nAap puch sakte hain:\n- Mera token kya hai?\n- Queue status";
 
-    // 🔥 TOKEN / QUEUE QUERY HANDLER
-    if (
-      userMessage.includes("token") ||
-      userMessage.includes("number") ||
-      userMessage.includes("queue") ||
-      userMessage.includes("mera number") ||
-      userMessage.includes("meri turn")
-    ) {
-      const userQueue = await Queue.findOne({
-        patientId: userId,
-        status: { $in: ["waiting", "missed"] },
-      });
+// TOKEN / QUEUE QUERY
+if (
+  userMessage.includes("token") ||
+  userMessage.includes("number") ||
+  userMessage.includes("queue") ||
+  userMessage.includes("mera number") ||
+  userMessage.includes("meri turn")
+) {
+  const userQueue = await Queue.findOne({
+    patientId: userId,
+    status: { $in: ["waiting", "missed"] },
+  }).sort({ createdAt: -1 }); // ✅ latest queue
 
-      if (!userQueue) {
-        reply = "Aapka koi active token nahi hai.";
-      } else {
-        const current = await Queue.findOne({
-          doctorId: userQueue.doctorId,
-          status: "in-progress",
-        });
+  if (!userQueue) {
+    reply = "Aapka koi active token nahi hai.";
+  } 
+  
+  else if (userQueue.status === "missed") {
+    reply =
+      "Aapki turn miss ho gayi hai 😕. Kripya reception se contact karein.";
+  } 
+  
+  else {
+    const current = await Queue.findOne({
+      doctorId: userQueue.doctorId,
+      status: "in-progress",
+    });
 
-        const currentToken = current ? current.tokenNumber : 0;
+    // current token safe
+    const currentToken = current?.tokenNumber || 0;
 
-        let peopleAhead = userQueue.tokenNumber - currentToken - 1;
+    let peopleAhead = userQueue.tokenNumber - currentToken - 1;
+    if (peopleAhead < 0) peopleAhead = 0;
 
-        if (peopleAhead < 0) peopleAhead = 0;
-
-        reply = `Aapka token ${userQueue.tokenNumber} hai. Aapse pehle ${peopleAhead} log hain.`;
-      }
+    if (!current) {
+      reply = `Aapka token ${userQueue.tokenNumber} hai. Queue abhi start nahi hui hai ⏳.`;
+    } else {
+      reply = `Aapka token ${userQueue.tokenNumber} hai. Aapse pehle ${peopleAhead} log hain.`;
     }
-
-    //  GREETING HANDLER (extra polish)
-    else if (
-      userMessage.includes("hi") ||
-      userMessage.includes("hello") ||
-      userMessage.includes("hey")
-    ) {
-      reply = "Hello 👋 kaise help kar sakta hoon?";
-    }
-
-    //  DEFAULT
-    res.json({ success: true, reply });
-  } catch (err) {
-    console.log("CHATBOT ERROR:", err.message);
-    res.json({ success: false, message: err.message });
   }
+}
+
+// GREETING
+else if (
+  userMessage.includes("hi") ||
+  userMessage.includes("hello") ||
+  userMessage.includes("hey")
+) {
+  reply =
+    "Hello 👋 Main aapki madad kar sakta hoon:\n- Token status\n- Queue position\n- Appointment info";
+}
+
+//  response
+res.json({ success: true, reply });
+
+
+} catch (err) {
+console.log("CHATBOT ERROR:", err.message);
+
+```
+res.status(500).json({
+  success: false,
+  message: "Chatbot error",
+});
+```
+
+}
 };
