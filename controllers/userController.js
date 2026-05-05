@@ -565,7 +565,7 @@ const paymentRazorpay = async (req, res) => {
     const options = {
       amount: appointmentData.amount * 100,
       currency: "INR",
-      receipt: `appt_${appointmentId}_${Date.now()}`, // 🔥 unique
+      receipt:appointmentId, // 🔥 unique
     };
 
     const order = await razorPayInstance.orders.create(options);
