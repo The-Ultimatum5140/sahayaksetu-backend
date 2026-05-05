@@ -20,7 +20,22 @@ connectCloudinary();
 
 // middlewares
 app.use(express.json());
-app.use(cors());
+const allowedOrigins = process.env.CLIENT_URL.split(",");
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // initializing end points
