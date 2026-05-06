@@ -20,21 +20,25 @@ connectCloudinary();
 
 // middlewares
 app.use(express.json());
-const allowedOrigins = process.env.CLIENT_URL.split(",");
+const allowedOrigins = process.env.CLIENT_URL.split(",").map((origin) =>
+  origin.trim().replace(/\/$/, ""),
+);
 
 app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      const cleanOrigin = origin.replace(/\/$/, "");
+
+      if (allowedOrigins.includes(cleanOrigin)) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
-  })
+  }),
 );
 app.use(express.urlencoded({ extended: true }));
 
